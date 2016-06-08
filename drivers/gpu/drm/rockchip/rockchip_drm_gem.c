@@ -127,7 +127,7 @@ rockchip_gem_prime_import_sg_table(struct drm_device *drm,
 
 	rk_obj->dma_addr = sg_dma_address(sgt->sgl);
 	rk_obj->sgt = sgt;
-	obj->size = sg_dma_len(sgt->sgl);
+	sg_dma_len(sgt->sgl) = obj->size;
 
 	return obj;
 }
