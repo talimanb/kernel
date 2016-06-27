@@ -1107,7 +1107,7 @@ static int vop_crtc_atomic_check(struct drm_crtc *crtc,
 	const struct vop_data *vop_data = vop->data;
 	struct drm_plane *plane;
 	struct vop_zpos *pzpos;
-	int dsp_layer_sel = 0;
+	int dsp_layer_sel = -1;
 	int i, cnt = 0, ret = 0;
 
 	pzpos = kmalloc_array(vop->num_wins, sizeof(*pzpos), GFP_KERNEL);
