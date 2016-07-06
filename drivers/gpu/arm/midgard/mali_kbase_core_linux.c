@@ -3813,12 +3813,11 @@ static int kbase_platform_device_remove(struct platform_device *pdev)
 	return 0;
 }
 
-extern void kbase_platform_rk_shutdown(struct kbase_device *kbdev);
+//extern void kbase_platform_rk_shutdown(struct kbase_device *kbdev);
 static void kbase_platform_device_shutdown(struct platform_device *pdev)
 {
-	struct kbase_device *kbdev = to_kbase_device(&pdev->dev);
-
-	kbase_platform_rk_shutdown(kbdev);
+//	struct kbase_device *kbdev = to_kbase_device(&pdev->dev);
+//	kbase_platform_rk_shutdown(kbdev);
 }
 
 static int kbase_platform_device_probe(struct platform_device *pdev)
