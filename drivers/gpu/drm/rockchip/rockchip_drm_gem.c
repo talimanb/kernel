@@ -117,13 +117,6 @@ rockchip_gem_prime_import_sg_table(struct drm_device *drm,
 	struct rockchip_gem_object *rk_obj;
 	struct drm_gem_object *obj;
 
-	/*
-	 * Todo: only support continuous buffer now, plan to found a method
-	 * to import non continuous with iommu.
-	 */
-	if (sgt->nents != 1)
-		return ERR_PTR(-EINVAL);
-
 	rk_obj = kzalloc(sizeof(*rk_obj), GFP_KERNEL);
 	if (!rk_obj)
 		return ERR_PTR(-ENOMEM);
