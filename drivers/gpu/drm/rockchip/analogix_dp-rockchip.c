@@ -170,6 +170,13 @@ rockchip_dp_drm_encoder_atomic_check(struct drm_encoder *encoder,
 {
 	struct rockchip_crtc_state *s = to_rockchip_crtc_state(crtc_state);
 
+	/*
+	 * The hardware IC designed that VOP must output the RGB10 video
+	 * format to eDP contoller, and if eDP panel only support RGB8,
+	 * then eDP contoller should cut down the video data, not via VOP
+	 * contoller, that's why we need to hardcode the VOP output mode
+	 * to RGA10 here.
+	 */
 	s->output_mode = ROCKCHIP_OUT_MODE_AAAA;
 	s->output_type = DRM_MODE_CONNECTOR_eDP;
 

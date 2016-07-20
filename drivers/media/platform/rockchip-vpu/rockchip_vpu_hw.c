@@ -163,8 +163,10 @@ static int rockchip_vpu_iommu_init(struct rockchip_vpu_dev *vpu)
 		return -ENOMEM;
 
 	vpu->domain = iommu_domain_alloc(vpu->dev->bus);
-	if (!vpu->domain)
+	if (!vpu->domain) {
+		ret = -ENOMEM;
 		goto err_free_parms;
+	}
 
 	ret = iommu_get_dma_cookie(vpu->domain);
 	if (ret)
@@ -229,13 +231,6 @@ int rockchip_vpu_hw_probe(struct rockchip_vpu_dev *vpu)
 		dev_err(vpu->dev, "failed to get hclk\n");
 		return PTR_ERR(vpu->hclk);
 	}
-
-	/*
-	 * Bump ACLK to max. possible freq. (400 MHz) to improve performance.
-	 *
-	 * VP8 encoding 1280x720@1.2Mbps 200 MHz: 39 fps, 400: MHz 77 fps
-	 */
-	clk_set_rate(vpu->aclk, 400*1000*1000);
 
 	res = platform_get_resource(vpu->pdev, IORESOURCE_MEM, 0);
 	vpu->base = devm_ioremap_resource(vpu->dev, res);

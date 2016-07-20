@@ -137,6 +137,7 @@
 	>;
 	idle-cost-data = <
 	      15
+	      15
 	       0
 	>;
 };
@@ -152,6 +153,7 @@
 		449    263	/* 1512M */
 	>;
 	idle-cost-data = <
+	      6
 	      6
 	      0
 	>;
@@ -171,6 +173,7 @@
 	idle-cost-data = <
 		 65
 		 65
+		 65
 	>;
 };
 
@@ -185,6 +188,7 @@
 		449    263	/* 1512M */
 	>;
 	idle-cost-data = <
+		56
 		56
 		56
 	>;
@@ -406,33 +410,3 @@
 		};
 	};
 };
-
-&cpu_l0 {
-	cpu-supply = <&vdd_cpu_l>;
-};
-
-&cpu_l1 {
-	cpu-supply = <&vdd_cpu_l>;
-};
-
-&cpu_l2 {
-	cpu-supply = <&vdd_cpu_l>;
-};
-
-&cpu_l3 {
-	cpu-supply = <&vdd_cpu_l>;
-};
-
-&cpu_b0 {
-	cpu-supply = <&vdd_cpu_b>;
-};
-
-&cpu_b1 {
-	cpu-supply = <&vdd_cpu_b>;
-};
-
-&gpu {
-	status = "okay";
-	mali-supply = <&vdd_gpu>;
-};
-

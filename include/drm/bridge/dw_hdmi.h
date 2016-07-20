@@ -25,6 +25,14 @@ enum dw_hdmi_devtype {
 	IMX6Q_HDMI,
 	IMX6DL_HDMI,
 	RK3288_HDMI,
+	RK3399_HDMI,
+};
+
+struct dw_hdmi_audio_tmds_n {
+	unsigned long tmds;
+	unsigned int n_32k;
+	unsigned int n_44k1;
+	unsigned int n_48k;
 };
 
 struct dw_hdmi_mpll_config {
@@ -49,12 +57,18 @@ struct dw_hdmi_phy_config {
 
 struct dw_hdmi_plat_data {
 	enum dw_hdmi_devtype dev_type;
+	const struct dw_hdmi_audio_tmds_n *tmds_n_table;
 	const struct dw_hdmi_mpll_config *mpll_cfg;
 	const struct dw_hdmi_curr_ctrl *cur_ctr;
 	const struct dw_hdmi_phy_config *phy_config;
 	enum drm_mode_status (*mode_valid)(struct drm_connector *connector,
 					   struct drm_display_mode *mode);
 };
+
+static inline bool is_rockchip(enum dw_hdmi_devtype dev_type)
+{
+	return dev_type == RK3288_HDMI || dev_type == RK3399_HDMI;
+}
 
 void dw_hdmi_unbind(struct device *dev, struct device *master, void *data);
 int dw_hdmi_bind(struct device *dev, struct device *master,

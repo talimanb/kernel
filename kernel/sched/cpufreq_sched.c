@@ -265,6 +265,8 @@ static int cpufreq_sched_policy_init(struct cpufreq_policy *policy)
 	pr_debug("%s: throttle threshold = %u [ns]\n",
 		  __func__, gd->throttle_nsec);
 
+	policy->governor_data = gd;
+
 	if (cpufreq_driver_is_slow()) {
 		cpufreq_driver_slow = true;
 		gd->task = kthread_create(cpufreq_sched_thread, policy,
@@ -281,7 +283,6 @@ static int cpufreq_sched_policy_init(struct cpufreq_policy *policy)
 		init_irq_work(&gd->irq_work, cpufreq_sched_irq_work);
 	}
 
-	policy->governor_data = gd;
 	set_sched_freq();
 
 	return 0;
@@ -327,6 +328,20 @@ static int cpufreq_sched_stop(struct cpufreq_policy *policy)
 	return 0;
 }
 
+static int cpufreq_sched_limits(struct cpufreq_policy *policy)
+{
+	if (policy->max < policy->cur)
+		__cpufreq_driver_target(policy,
+					policy->max,
+					CPUFREQ_RELATION_H);
+	else if (policy->min > policy->cur)
+		__cpufreq_driver_target(policy,
+					policy->min,
+					CPUFREQ_RELATION_L);
+
+	return 0;
+}
+
 static int cpufreq_sched_setup(struct cpufreq_policy *policy,
 			       unsigned int event)
 {
@@ -340,7 +355,7 @@ static int cpufreq_sched_setup(struct cpufreq_policy *policy,
 	case CPUFREQ_GOV_STOP:
 		return cpufreq_sched_stop(policy);
 	case CPUFREQ_GOV_LIMITS:
-		break;
+		return cpufreq_sched_limits(policy);
 	}
 	return 0;
 }

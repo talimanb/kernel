@@ -118,6 +118,13 @@
 		//status = "disabled";
 	};
 
+	ext_gmac: external-gmac-clock {
+		compatible = "fixed-clock";
+		clock-frequency = <125000000>;
+		clock-output-names = "ext_gmac";
+		#clock-cells = <0>;
+	};
+
 	gpio-keys {
 		compatible = "gpio-keys";
 		#address-cells = <1>;
@@ -171,6 +178,16 @@
 		regulator-boot-on;
 	};
 
+	/* This switch DIO3222 HOST_DP_HOST to host2 (dwc2) */
+	vcc_3g: vcc-3g-regulator {
+		compatible = "regulator-fixed";
+		enable-active-high;
+		gpio = <&gpio7 8 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pwr_3g>;
+		regulator-name = "vcc_3g";
+	};
+
 	/*
 	 * NOTE: vcc_sd isn't hooked up on v1.0 boards where power comes from
 	 * vcc_io directly.  Those boards won't be able to power cycle SD cards
@@ -221,6 +238,7 @@
 };
 
 &sdmmc {
+	supports-sd;
 	bus-width = <4>;
 	cap-mmc-highspeed;
 	cap-sd-highspeed;
@@ -233,6 +251,22 @@
 	vmmc-supply = <&vcc_sd>;
 	vqmmc-supply = <&vccio_sd>;
 	supports-sd;
+};
+
+&gmac {
+	phy-supply = <&vcc_phy>;
+	phy-mode = "rgmii";
+	clock_in_out = "input";
+	snps,reset-gpio = <&gpio4 7 0>;
+	snps,reset-active-low;
+	snps,reset-delays-us = <0 10000 1000000>;
+	assigned-clocks = <&cru SCLK_MAC>;
+	assigned-clock-parents = <&ext_gmac>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&rgmii_pins>;
+	tx_delay = <0x30>;
+	rx_delay = <0x10>;
+	status = "ok";
 };
 
 &edp_phy {
@@ -358,6 +392,10 @@
 	usb {
 		host_vbus_drv: host-vbus-drv {
 			rockchip,pins = <0 14 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		pwr_3g: pwr-3g {
+			rockchip,pins = <7 8 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 	};
 
