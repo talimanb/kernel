@@ -1145,9 +1145,18 @@ void es8323_i2c_shutdown(struct i2c_client *client)
 	mdelay(150);
 }
 
+#if defined(CONFIG_OF)
+static const struct of_device_id es8323_of_match[] = {
+	{ .compatible = "everest,es8323", },
+	{ }
+};
+MODULE_DEVICE_TABLE(of, es8323_of_match);
+#endif
+
 static struct i2c_driver es8323_i2c_driver = {
 	.driver = {
 		   .name = "ES8323",
+		   .of_match_table = of_match_ptr(es8323_of_match),
 		   },
 	.shutdown = es8323_i2c_shutdown,
 	.probe = es8323_i2c_probe,
