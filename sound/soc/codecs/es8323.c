@@ -21,6 +21,7 @@
 #include <linux/slab.h>
 #include <linux/of_gpio.h>
 #include <sound/core.h>
+#include <linux/clk.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/tlv.h>
@@ -80,6 +81,7 @@ static u16 es8323_reg[] = {
 /* codec private data */
 struct es8323_priv {
 	unsigned int sysclk;
+	struct clk *mclk;
 	struct snd_pcm_hw_constraint_list *sysclk_constraints;
 
 	int spk_ctl_gpio;
@@ -765,12 +767,23 @@ static int es8323_mute(struct snd_soc_dai *dai, int mute)
 static int es8323_set_bias_level(struct snd_soc_codec *codec,
 				 enum snd_soc_bias_level level)
 {
+	struct es8323_priv *es8323 = snd_soc_codec_get_drvdata(codec);
+	int ret;
 	switch (level) {
 	case SND_SOC_BIAS_ON:
 		dev_dbg(codec->dev, "%s on\n", __func__);
 		break;
 	case SND_SOC_BIAS_PREPARE:
 		dev_dbg(codec->dev, "%s prepare\n", __func__);
+		if (IS_ERR(es8323->mclk))
+			break;
+		if (snd_soc_codec_get_bias_level(codec) == SND_SOC_BIAS_ON) {
+			clk_disable_unprepare(es8323->mclk);
+		} else {
+			ret = clk_prepare_enable(es8323->mclk);
+			if (ret)
+				return ret;
+		}
 		snd_soc_write(codec, ES8323_ANAVOLMANAG, 0x7C);
 		snd_soc_write(codec, ES8323_CHIPLOPOW1, 0x00);
 		snd_soc_write(codec, ES8323_CHIPLOPOW2, 0x00);
@@ -786,6 +799,8 @@ static int es8323_set_bias_level(struct snd_soc_codec *codec,
 		snd_soc_write(codec, ES8323_ADCPOWER, 0x59);
 		break;
 	case SND_SOC_BIAS_OFF:
+		if (es8323->mclk)
+			clk_disable_unprepare(es8323->mclk);
 		dev_dbg(codec->dev, "%s off\n", __func__);
 		snd_soc_write(codec, ES8323_ADCPOWER, 0xFF);
 		snd_soc_write(codec, ES8323_DACPOWER, 0xC0);
@@ -866,7 +881,7 @@ static int es8323_resume(struct snd_soc_codec *codec)
 static struct snd_soc_codec *es8323_codec;
 static int es8323_probe(struct snd_soc_codec *codec)
 {
-	// struct es8323_priv *es8323 = snd_soc_codec_get_drvdata(codec);
+	struct es8323_priv *es8323 = snd_soc_codec_get_drvdata(codec);
 	int ret = 0;
 
 	printk("%s\n", __func__);
@@ -876,8 +891,16 @@ static int es8323_probe(struct snd_soc_codec *codec)
 		return -ENODEV;
 	}
 
-	codec->hw_write = (hw_write_t) i2c_master_send;
+	es8323->mclk = devm_clk_get(codec->dev, "mclk");
+	if (IS_ERR(es8323->mclk)) {
+		dev_err(codec->dev, "%s mclk is missing or invalid\n", __func__);
+		return PTR_ERR(es8323->mclk);
+	}
+	ret = clk_prepare_enable(es8323->mclk);
+	if (ret)
+		return ret;
 
+	codec->hw_write = (hw_write_t) i2c_master_send;
 	codec->control_data = container_of(codec->dev, struct i2c_client, dev);
 
 	es8323_codec = codec;
