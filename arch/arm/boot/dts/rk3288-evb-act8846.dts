@@ -98,6 +98,7 @@
 		regulator-name = "vdd_gpu";
 		regulator-min-microvolt = <850000>;
 		regulator-max-microvolt = <1350000>;
+		regulator-enable-ramp-delay = <10>;
 		regulator-always-on;
 		vin-supply = <&vcc_sys>;
 	};
