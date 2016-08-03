@@ -58,6 +58,19 @@
 		clock-output-names = "ext_gmac";
 	};
 
+	sound {
+		compatible = "simple-audio-card";
+		simple-audio-card,format = "i2s";
+		simple-audio-card,name = "rockchip,fennec-codec";
+		simple-audio-card,mclk-fs = <512>;
+		simple-audio-card,cpu {
+			sound-dai = <&i2s>;
+		};
+		simple-audio-card,codec {
+			sound-dai = <&hdmi>;
+		};
+	};
+
 	vcc_sys: vsys-regulator {
 		compatible = "regulator-fixed";
 		regulator-name = "vcc_sys";
@@ -65,6 +78,30 @@
 		regulator-max-microvolt = <5000000>;
 		regulator-always-on;
 		regulator-boot-on;
+	};
+
+	vcc_host: usb-host-regulator {
+		compatible = "regulator-fixed";
+		enable-active-high;
+		gpio = <&gpio0 14 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&host_drv>;
+		regulator-name = "vcc_host_5v";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		regulator-always-on;
+	};
+
+	vcc_otg: usb-otg-regulator {
+		compatible = "regulator-fixed";
+		enable-active-high;
+		gpio = <&gpio0 12 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&otg_drv>;
+		regulator-name = "vcc_otg_5v";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		regulator-always-on;
 	};
 };
 
@@ -120,6 +157,10 @@
 };
 
 &hdmi {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	#sound-dai-cells = <0>;
+	ddc-i2c-bus = <&i2c5>;
 	status = "okay";
 };
 
@@ -313,6 +354,15 @@
 	};
 };
 
+&i2c5 {
+	status = "okay";
+};
+
+&i2s {
+	#sound-dai-cells = <0>;
+	status = "okay";
+};
+
 &pinctrl {
 	pcfg_output_high: pcfg-output-high {
 		output-high;
@@ -372,9 +422,15 @@
 		};
 	};
 
-	usbphy {
+	usb_host {
 		host_drv: host-drv {
 			rockchip,pins = <0 14 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+
+	usb_otg {
+		otg_drv: otg-drv {
+			rockchip,pins = <0 12 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 	};
 };
@@ -384,9 +440,6 @@
 };
 
 &usbphy {
-	pinctrl-names = "default";
-	pinctrl-0 = <&host_drv>;
-	vbus_drv-gpios = <&gpio0 14 GPIO_ACTIVE_HIGH>;
 	status = "okay";
 };
 

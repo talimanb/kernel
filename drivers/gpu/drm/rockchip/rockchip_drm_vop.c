@@ -37,34 +37,55 @@
 #include "rockchip_drm_fb.h"
 #include "rockchip_drm_vop.h"
 
-#define __REG_SET_RELAXED(x, off, mask, shift, v, write_mask) \
-		vop_mask_write(x, off, mask, shift, v, write_mask, true)
+#define VOP_REG_SUPPORT(vop, reg) \
+		(!reg.major || (reg.major == VOP_MAJOR(vop->data->version) && \
+		reg.begin_minor <= VOP_MINOR(vop->data->version) && \
+		reg.end_minor >= VOP_MINOR(vop->data->version) && \
+		reg.mask))
 
-#define __REG_SET_NORMAL(x, off, mask, shift, v, write_mask) \
-		vop_mask_write(x, off, mask, shift, v, write_mask, false)
+#define VOP_WIN_SUPPORT(vop, win, name) \
+		VOP_REG_SUPPORT(vop, win->phy->name)
 
-#define REG_SET(x, off, reg, v, mode) \
-		__REG_SET_##mode(x, off + reg.offset, \
-				 reg.mask, reg.shift, v, reg.write_mask)
-#define REG_SET_MASK(x, off, reg, mask, v, mode) \
-		__REG_SET_##mode(x, off + reg.offset, \
-				 mask, reg.shift, v, reg.write_mask)
+#define VOP_CTRL_SUPPORT(vop, win, name) \
+		VOP_REG_SUPPORT(vop, vop->data->ctrl->name)
+
+#define VOP_INTR_SUPPORT(vop, win, name) \
+		VOP_REG_SUPPORT(vop, vop->data->intr->name)
+
+#define __REG_SET(x, off, mask, shift, v, write_mask, relaxed) \
+		vop_mask_write(x, off, mask, shift, v, write_mask, relaxed)
+
+#define _REG_SET(vop, name, off, reg, mask, v, relaxed) \
+	do { \
+		if (VOP_REG_SUPPORT(vop, reg)) \
+			__REG_SET(vop, off + reg.offset, mask, reg.shift, \
+				  v, reg.write_mask, relaxed); \
+		else \
+			dev_dbg(vop->dev, "Warning: not support "#name"\n"); \
+	} while(0)
+
+#define REG_SET(x, name, off, reg, v, relaxed) \
+		_REG_SET(x, name, off, reg, reg.mask, v, relaxed)
+#define REG_SET_MASK(x, name, off, reg, mask, v, relaxed) \
+		_REG_SET(x, name, off, reg, reg.mask & mask, v, relaxed)
 
 #define VOP_WIN_SET(x, win, name, v) \
-		REG_SET(x, win->offset, VOP_WIN_NAME(win, name), v, RELAXED)
+		REG_SET(x, name, win->offset, VOP_WIN_NAME(win, name), v, true)
 #define VOP_SCL_SET(x, win, name, v) \
-		REG_SET(x, win->offset, win->phy->scl->name, v, RELAXED)
+		REG_SET(x, name, win->offset, win->phy->scl->name, v, true)
 #define VOP_SCL_SET_EXT(x, win, name, v) \
-		REG_SET(x, win->offset, win->phy->scl->ext->name, v, RELAXED)
+		REG_SET(x, name, win->offset, win->phy->scl->ext->name, v, true)
 
 #define VOP_CTRL_SET(x, name, v) \
-		REG_SET(x, 0, (x)->data->ctrl->name, v, NORMAL)
+		REG_SET(x, name, 0, (x)->data->ctrl->name, v, false)
 
 #define VOP_INTR_GET(vop, name) \
 		vop_read_reg(vop, 0, &vop->data->ctrl->name)
 
 #define VOP_INTR_SET(vop, name, mask, v) \
-		REG_SET_MASK(vop, 0, vop->data->intr->name, mask, v, NORMAL)
+		REG_SET_MASK(vop, name, 0, vop->data->intr->name, \
+			     mask, v, false)
+
 #define VOP_INTR_SET_TYPE(vop, name, type, v) \
 	do { \
 		int i, reg = 0, mask = 0; \
@@ -79,6 +100,9 @@
 #define VOP_INTR_GET_TYPE(vop, name, type) \
 		vop_get_intr_type(vop, &vop->data->intr->name, type)
 
+#define VOP_CTRL_GET(x, name) \
+		vop_read_reg(x, 0, vop->data->ctrl->name)
+
 #define VOP_WIN_GET(x, win, name) \
 		vop_read_reg(x, win->offset, &VOP_WIN_NAME(win, name))
 
@@ -87,9 +111,6 @@
 
 #define VOP_WIN_GET_YRGBADDR(vop, win) \
 		vop_readl(vop, win->offset + VOP_WIN_NAME(win, yrgb_mst).offset)
-
-#define VOP_WIN_SUPPORT(win, name) \
-		(win->phy->name.mask ? true : false)
 
 #define to_vop(x) container_of(x, struct vop, crtc)
 #define to_vop_win(x) container_of(x, struct vop_win, base)
@@ -132,7 +153,6 @@ struct vop {
 	struct device *dev;
 	struct drm_device *drm_dev;
 	struct drm_property *plane_zpos_prop;
-	bool is_enabled;
 
 	/* mutex vsync_ work */
 	struct mutex vsync_mutex;
@@ -440,9 +460,6 @@ static void vop_dsp_hold_valid_irq_enable(struct vop *vop)
 {
 	unsigned long flags;
 
-	if (WARN_ON(!vop->is_enabled))
-		return;
-
 	spin_lock_irqsave(&vop->irq_lock, flags);
 
 	VOP_INTR_SET_TYPE(vop, enable, DSP_HOLD_VALID_INTR, 1);
@@ -454,9 +471,6 @@ static void vop_dsp_hold_valid_irq_disable(struct vop *vop)
 {
 	unsigned long flags;
 
-	if (WARN_ON(!vop->is_enabled))
-		return;
-
 	spin_lock_irqsave(&vop->irq_lock, flags);
 
 	VOP_INTR_SET_TYPE(vop, enable, DSP_HOLD_VALID_INTR, 0);
@@ -467,24 +481,21 @@ static void vop_dsp_hold_valid_irq_disable(struct vop *vop)
 static void vop_enable(struct drm_crtc *crtc)
 {
 	struct vop *vop = to_vop(crtc);
-	int ret;
+	int ret, i;
 
-	if (vop->is_enabled)
-		return;
-
-	ret = clk_enable(vop->hclk);
+	ret = clk_prepare_enable(vop->hclk);
 	if (ret < 0) {
 		dev_err(vop->dev, "failed to enable hclk - %d\n", ret);
 		return;
 	}
 
-	ret = clk_enable(vop->dclk);
+	ret = clk_prepare_enable(vop->dclk);
 	if (ret < 0) {
 		dev_err(vop->dev, "failed to enable dclk - %d\n", ret);
 		goto err_disable_hclk;
 	}
 
-	ret = clk_enable(vop->aclk);
+	ret = clk_prepare_enable(vop->aclk);
 	if (ret < 0) {
 		dev_err(vop->dev, "failed to enable aclk - %d\n", ret);
 		goto err_disable_dclk;
@@ -508,11 +519,15 @@ static void vop_enable(struct drm_crtc *crtc)
 		goto err_disable_aclk;
 	}
 
-	memcpy(vop->regs, vop->regsbak, vop->len);
-	/*
-	 * At here, vop clock & iommu is enable, R/W vop regs would be safe.
-	 */
-	vop->is_enabled = true;
+	memcpy(vop->regsbak, vop->regs, vop->len);
+
+	VOP_CTRL_SET(vop, global_regdone_en, 1);
+
+	for (i = 0; i < vop->num_wins; i++) {
+		struct vop_win *win = &vop->win[i];
+
+		VOP_WIN_SET(vop, win, gate, 1);
+	}
 
 	spin_lock(&vop->reg_lock);
 
@@ -527,20 +542,17 @@ static void vop_enable(struct drm_crtc *crtc)
 	return;
 
 err_disable_aclk:
-	clk_disable(vop->aclk);
+	clk_disable_unprepare(vop->aclk);
 err_disable_dclk:
-	clk_disable(vop->dclk);
+	clk_disable_unprepare(vop->dclk);
 err_disable_hclk:
-	clk_disable(vop->hclk);
+	clk_disable_unprepare(vop->hclk);
 }
 
 static void vop_crtc_disable(struct drm_crtc *crtc)
 {
 	struct vop *vop = to_vop(crtc);
 	int i;
-
-	if (!vop->is_enabled)
-		return;
 
 	/*
 	 * We need to make sure that all windows are disabled before we
@@ -554,6 +566,7 @@ static void vop_crtc_disable(struct drm_crtc *crtc)
 		VOP_WIN_SET(vop, win, enable, 0);
 		spin_unlock(&vop->reg_lock);
 	}
+	vop_cfg_done(vop);
 
 	drm_crtc_vblank_off(crtc);
 
@@ -579,17 +592,15 @@ static void vop_crtc_disable(struct drm_crtc *crtc)
 
 	disable_irq(vop->irq);
 
-	vop->is_enabled = false;
-
 	/*
 	 * vop standby complete, so iommu detach is safe.
 	 */
 	rockchip_drm_dma_detach_device(vop->drm_dev, vop->dev);
 
 	pm_runtime_put(vop->dev);
-	clk_disable(vop->dclk);
-	clk_disable(vop->aclk);
-	clk_disable(vop->hclk);
+	clk_disable_unprepare(vop->dclk);
+	clk_disable_unprepare(vop->aclk);
+	clk_disable_unprepare(vop->hclk);
 }
 
 static void vop_plane_destroy(struct drm_plane *plane)
@@ -735,9 +746,6 @@ static void vop_plane_atomic_update(struct drm_plane *plane,
 	if (!crtc)
 		return;
 
-	if (WARN_ON(!vop->is_enabled))
-		return;
-
 	if (!vop_plane_state->enable) {
 		vop_plane_atomic_disable(plane, old_state);
 		return;
@@ -811,8 +819,11 @@ static void vop_plane_atomic_update(struct drm_plane *plane,
 			SRC_ALPHA_CAL_M0(ALPHA_NO_SATURATION) |
 			SRC_FACTOR_M0(ALPHA_ONE);
 		VOP_WIN_SET(vop, win, src_alpha_ctl, val);
+		VOP_WIN_SET(vop, win, alpha_mode, 1);
+		VOP_WIN_SET(vop, win, alpha_en, 1);
 	} else {
 		VOP_WIN_SET(vop, win, src_alpha_ctl, SRC_ALPHA_EN(0));
+		VOP_WIN_SET(vop, win, alpha_en, 0);
 	}
 
 	VOP_WIN_SET(vop, win, enable, 1);
@@ -937,9 +948,6 @@ static int vop_crtc_enable_vblank(struct drm_crtc *crtc)
 	struct vop *vop = to_vop(crtc);
 	unsigned long flags;
 
-	if (WARN_ON(!vop->is_enabled))
-		return -EPERM;
-
 	spin_lock_irqsave(&vop->irq_lock, flags);
 
 	VOP_INTR_SET_TYPE(vop, enable, FS_INTR, 1);
@@ -953,9 +961,6 @@ static void vop_crtc_disable_vblank(struct drm_crtc *crtc)
 {
 	struct vop *vop = to_vop(crtc);
 	unsigned long flags;
-
-	if (WARN_ON(!vop->is_enabled))
-		return;
 
 	spin_lock_irqsave(&vop->irq_lock, flags);
 
@@ -1199,9 +1204,6 @@ static void vop_crtc_atomic_flush(struct drm_crtc *crtc,
 			to_rockchip_crtc_state(crtc->state);
 	struct vop *vop = to_vop(crtc);
 
-	if (WARN_ON(!vop->is_enabled))
-		return;
-
 	spin_lock(&vop->reg_lock);
 
 	VOP_CTRL_SET(vop, dsp_layer_sel, s->dsp_layer_sel);
@@ -1373,10 +1375,10 @@ static int vop_plane_init(struct vop *vop, struct vop_win *win,
 	drm_object_attach_property(&win->base.base,
 				   vop->plane_zpos_prop, win->win_id);
 
-	if (VOP_WIN_SUPPORT(win, xmirror))
+	if (VOP_WIN_SUPPORT(vop, win, xmirror))
 		rotations |= BIT(DRM_REFLECT_X);
 
-	if (VOP_WIN_SUPPORT(win, ymirror))
+	if (VOP_WIN_SUPPORT(vop, win, ymirror))
 		rotations |= BIT(DRM_REFLECT_Y);
 
 	if (rotations) {
@@ -1504,103 +1506,6 @@ static void vop_destroy_crtc(struct vop *vop)
 	drm_crtc_cleanup(crtc);
 }
 
-static int vop_initial(struct vop *vop)
-{
-	const struct vop_data *vop_data = vop->data;
-	const struct vop_reg_data *init_table = vop_data->init_table;
-	struct reset_control *ahb_rst;
-	int i, ret;
-
-	vop->hclk = devm_clk_get(vop->dev, "hclk_vop");
-	if (IS_ERR(vop->hclk)) {
-		dev_err(vop->dev, "failed to get hclk source\n");
-		return PTR_ERR(vop->hclk);
-	}
-	vop->aclk = devm_clk_get(vop->dev, "aclk_vop");
-	if (IS_ERR(vop->aclk)) {
-		dev_err(vop->dev, "failed to get aclk source\n");
-		return PTR_ERR(vop->aclk);
-	}
-	vop->dclk = devm_clk_get(vop->dev, "dclk_vop");
-	if (IS_ERR(vop->dclk)) {
-		dev_err(vop->dev, "failed to get dclk source\n");
-		return PTR_ERR(vop->dclk);
-	}
-
-	ret = clk_prepare(vop->dclk);
-	if (ret < 0) {
-		dev_err(vop->dev, "failed to prepare dclk\n");
-		return ret;
-	}
-
-	/* Enable both the hclk and aclk to setup the vop */
-	ret = clk_prepare_enable(vop->hclk);
-	if (ret < 0) {
-		dev_err(vop->dev, "failed to prepare/enable hclk\n");
-		goto err_unprepare_dclk;
-	}
-
-	ret = clk_prepare_enable(vop->aclk);
-	if (ret < 0) {
-		dev_err(vop->dev, "failed to prepare/enable aclk\n");
-		goto err_disable_hclk;
-	}
-
-	/*
-	 * do hclk_reset, reset all vop registers.
-	 */
-	ahb_rst = devm_reset_control_get(vop->dev, "ahb");
-	if (IS_ERR(ahb_rst)) {
-		dev_err(vop->dev, "failed to get ahb reset\n");
-		ret = PTR_ERR(ahb_rst);
-		goto err_disable_aclk;
-	}
-	reset_control_assert(ahb_rst);
-	usleep_range(10, 20);
-	reset_control_deassert(ahb_rst);
-
-	memcpy(vop->regsbak, vop->regs, vop->len);
-
-	for (i = 0; i < vop_data->table_size; i++)
-		vop_writel(vop, init_table[i].offset, init_table[i].value);
-
-	for (i = 0; i < vop->num_wins; i++) {
-		struct vop_win *win = &vop->win[i];
-
-		VOP_WIN_SET(vop, win, enable, 0);
-	}
-
-	vop_cfg_done(vop);
-
-	/*
-	 * do dclk_reset, let all config take affect.
-	 */
-	vop->dclk_rst = devm_reset_control_get(vop->dev, "dclk");
-	if (IS_ERR(vop->dclk_rst)) {
-		dev_err(vop->dev, "failed to get dclk reset\n");
-		ret = PTR_ERR(vop->dclk_rst);
-		goto err_disable_aclk;
-	}
-	reset_control_assert(vop->dclk_rst);
-	usleep_range(10, 20);
-	reset_control_deassert(vop->dclk_rst);
-
-	clk_disable(vop->hclk);
-	clk_disable(vop->aclk);
-
-	vop->is_enabled = false;
-
-	return 0;
-
-err_disable_aclk:
-	clk_disable_unprepare(vop->aclk);
-err_disable_hclk:
-	clk_disable_unprepare(vop->hclk);
-err_unprepare_dclk:
-	clk_unprepare(vop->dclk);
-	return ret;
-}
-
 /*
  * Initialize the vop->win array elements.
  */
@@ -1705,10 +1610,20 @@ static int vop_bind(struct device *dev, struct device *master, void *data)
 	if (!vop->regsbak)
 		return -ENOMEM;
 
-	ret = vop_initial(vop);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "cannot initial vop dev - err %d\n", ret);
-		return ret;
+	vop->hclk = devm_clk_get(vop->dev, "hclk_vop");
+	if (IS_ERR(vop->hclk)) {
+		dev_err(vop->dev, "failed to get hclk source\n");
+		return PTR_ERR(vop->hclk);
+	}
+	vop->aclk = devm_clk_get(vop->dev, "aclk_vop");
+	if (IS_ERR(vop->aclk)) {
+		dev_err(vop->dev, "failed to get aclk source\n");
+		return PTR_ERR(vop->aclk);
+	}
+	vop->dclk = devm_clk_get(vop->dev, "dclk_vop");
+	if (IS_ERR(vop->dclk)) {
+		dev_err(vop->dev, "failed to get dclk source\n");
+		return PTR_ERR(vop->dclk);
 	}
 
 	irq = platform_get_irq(pdev, 0);

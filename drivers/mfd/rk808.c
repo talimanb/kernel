@@ -38,6 +38,7 @@ struct rk8xx_power_data {
 	const struct mfd_cell *rk8xx_cell;
 	int cell_num;
 	struct regmap_irq_chip *rk8xx_irq_chip;
+	int (*pm_shutdown)(struct regmap *regmap);
 };
 
 static bool rk808_is_volatile_reg(struct device *dev, unsigned int reg)
@@ -62,6 +63,58 @@ static bool rk808_is_volatile_reg(struct device *dev, unsigned int reg)
 	case RK808_DEVCTRL_REG:
 	case RK808_INT_STS_REG1:
 	case RK808_INT_STS_REG2:
+		return true;
+	}
+
+	return false;
+}
+
+static int rk808_shutdown(struct regmap *regmap)
+{
+	int ret;
+
+	ret = regmap_update_bits(regmap,
+				 RK808_DEVCTRL_REG,
+				 DEV_OFF_RST, DEV_OFF_RST);
+	return ret;
+}
+
+static int rk818_shutdown(struct regmap *regmap)
+{
+	int ret;
+
+	ret = regmap_update_bits(regmap,
+				 RK818_DEVCTRL_REG,
+				 DEV_OFF, DEV_OFF);
+	return ret;
+}
+
+static bool rk818_is_volatile_reg(struct device *dev, unsigned int reg)
+{
+	/*
+	 * Notes:
+	 * - Technically the ROUND_30s bit makes RTC_CTRL_REG volatile, but
+	 *   we don't use that feature.  It's better to cache.
+	 * - It's unlikely we care that RK808_DEVCTRL_REG is volatile since
+	 *   bits are cleared in case when we shutoff anyway, but better safe.
+	 */
+
+	switch (reg) {
+	case RK808_SECONDS_REG ... RK808_WEEKS_REG:
+	case RK808_RTC_STATUS_REG:
+	case RK808_VB_MON_REG:
+	case RK808_THERMAL_REG:
+	case RK808_DCDC_EN_REG:
+	case RK808_DCDC_UV_STS_REG:
+	case RK808_LDO_UV_STS_REG:
+	case RK808_DCDC_PG_REG:
+	case RK808_LDO_PG_REG:
+	case RK808_DEVCTRL_REG:
+	case RK808_INT_STS_REG1:
+	case RK808_INT_STS_REG2:
+	case RK808_INT_STS_MSK_REG1:
+	case RK808_INT_STS_MSK_REG2:
+	case RK818_SUP_STS_REG ... RK818_SAVE_DATA19:
 		return true;
 	}
 
@@ -164,12 +217,14 @@ static const struct regmap_config rk818_regmap_config = {
 	.val_bits = 8,
 	.max_register = RK818_SAVE_DATA19,
 	.cache_type = REGCACHE_RBTREE,
-	.volatile_reg = rk808_is_volatile_reg,
+	.volatile_reg = rk818_is_volatile_reg,
 };
 
 static const struct mfd_cell rk818s[] = {
 	{ .name = "rk808-clkout", },
 	{ .name = "rk818-regulator", },
+	{ .name = "rk818-battery", .of_compatible = "rk818-battery", },
+	{ .name = "rk818-charger", },
 	{
 		.name = "rk808-rtc",
 		.num_resources = ARRAY_SIZE(rtc_resources),
@@ -271,6 +326,7 @@ static struct rk8xx_power_data rk808_power_data = {
 	.rk8xx_cell = rk808s,
 	.cell_num = ARRAY_SIZE(rk808s),
 	.rk8xx_irq_chip = &rk808_irq_chip,
+	.pm_shutdown = rk808_shutdown,
 };
 
 static struct rk8xx_power_data rk818_power_data = {
@@ -281,9 +337,12 @@ static struct rk8xx_power_data rk818_power_data = {
 	.rk8xx_cell = rk818s,
 	.cell_num = ARRAY_SIZE(rk818s),
 	.rk8xx_irq_chip = &rk818_irq_chip,
+	.pm_shutdown = rk818_shutdown,
 };
 
+static int (*pm_shutdown)(struct regmap *regmap);
 static struct i2c_client *rk808_i2c_client;
+
 static void rk808_device_shutdown(void)
 {
 	int ret;
@@ -295,9 +354,7 @@ static void rk808_device_shutdown(void)
 		return;
 	}
 
-	ret = regmap_update_bits(rk808->regmap,
-				 RK808_DEVCTRL_REG,
-				 DEV_OFF_RST, DEV_OFF_RST);
+	ret = pm_shutdown(rk808->regmap);
 	if (ret)
 		dev_err(&rk808_i2c_client->dev, "power off error!\n");
 }
@@ -346,6 +403,12 @@ static int rk808_probe(struct i2c_client *client,
 	if (IS_ERR(rk808->regmap)) {
 		dev_err(&client->dev, "regmap initialization failed\n");
 		return PTR_ERR(rk808->regmap);
+	}
+
+	pm_shutdown = pdata->pm_shutdown;
+	if (!pm_shutdown) {
+		dev_err(&client->dev, "shutdown initialization failed\n");
+		return -EINVAL;
 	}
 
 	for (i = 0; i < pdata->reg_num; i++) {
