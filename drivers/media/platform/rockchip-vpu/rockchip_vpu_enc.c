@@ -132,6 +132,7 @@ enum {
 	ROCKCHIP_VPU_ENC_CTRL_REG_PARAMS,
 	ROCKCHIP_VPU_ENC_CTRL_HW_PARAMS,
 	ROCKCHIP_VPU_ENC_CTRL_RET_PARAMS,
+	ROCKCHIP_VPU_ENC_CTRL_JPEG_QMATRIX,
 };
 
 static struct rockchip_vpu_control controls[] = {
@@ -168,6 +169,14 @@ static struct rockchip_vpu_control controls[] = {
 		.is_read_only = true,
 		.max_stores = VIDEO_MAX_FRAME,
 		.elem_size = ROCKCHIP_RET_PARAMS_SIZE,
+	},
+	[ROCKCHIP_VPU_ENC_CTRL_JPEG_QMATRIX] = {
+		.id = V4L2_CID_JPEG_QMATRIX,
+		.type = V4L2_CTRL_TYPE_PRIVATE,
+		.name = "JPEG Qual Matrix",
+		.elem_size = sizeof(struct v4l2_ctrl_jpeg_qmatrix),
+		.max_stores = VIDEO_MAX_FRAME,
+		.can_store = true,
 	},
 	/* Generic controls. (currently ignored) */
 	{
@@ -319,7 +328,7 @@ static inline const void *get_ctrl_ptr(struct rockchip_vpu_ctx *ctx, unsigned id
 {
 	struct v4l2_ctrl *ctrl = ctx->ctrls[id];
 
-	return ctrl->p_cur.p;
+	return ctrl->p_new.p;
 }
 
 static const char *const *rockchip_vpu_enc_get_menu(u32 id)
@@ -890,6 +899,7 @@ static int rockchip_vpu_enc_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_PRIVATE_ROCKCHIP_HEADER:
 	case V4L2_CID_PRIVATE_ROCKCHIP_REG_PARAMS:
 	case V4L2_CID_PRIVATE_ROCKCHIP_HW_PARAMS:
+	case V4L2_CID_JPEG_QMATRIX:
 		/* Nothing to do here. The control is used directly. */
 		break;
 
@@ -1184,6 +1194,16 @@ static void rockchip_vpu_buf_finish(struct vb2_buffer *vb)
 
 		buf = vb_to_buf(vb);
 		rockchip_vpu_h264e_assemble_bitstream(ctx, buf);
+
+	} else if (vq->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE
+	    && vb->state == VB2_BUF_STATE_DONE
+	    && ctx->vpu_dst_fmt->fourcc == V4L2_PIX_FMT_JPEG) {
+		struct rockchip_vpu_buf *buf;
+		buf = vb_to_buf(vb);
+
+		vb2_set_plane_payload(&buf->vb.vb2_buf, 0,
+				ctx->run.dst->enc_jpeg.encoded_size);
+		vpu_debug(4, "JPEG finish");
 	}
 
 	vpu_debug_leave();
@@ -1345,7 +1365,11 @@ static void rockchip_vpu_enc_prepare_run(struct rockchip_vpu_ctx *ctx)
 	} else if (ctx->vpu_dst_fmt->fourcc == V4L2_PIX_FMT_H264) {
 		ctx->run.h264e.reg_params = get_ctrl_ptr(ctx,
 			ROCKCHIP_VPU_ENC_CTRL_REG_PARAMS);
+	} else if (V4L2_PIX_FMT_JPEG == ctx->vpu_dst_fmt->fourcc) {
+		ctx->run.enc_jpeg.qmatrix = get_ctrl_ptr(ctx,
+				ROCKCHIP_VPU_ENC_CTRL_JPEG_QMATRIX);
 	}
+	
 }
 
 static const struct rockchip_vpu_run_ops rockchip_vpu_enc_run_ops = {
