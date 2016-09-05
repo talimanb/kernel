@@ -46,16 +46,6 @@
 / {
 	compatible = "rockchip,rk3399-evb", "rockchip,rk3399";
 
-	vdd_center: vdd-center {
-		compatible = "pwm-regulator";
-		pwms = <&pwm3 0 25000 0>;
-		regulator-name = "vdd_center";
-		regulator-min-microvolt = <800000>;
-		regulator-max-microvolt = <1400000>;
-		regulator-always-on;
-		regulator-boot-on;
-	};
-
 	vcc3v3_sys: vcc3v3-sys {
 		compatible = "regulator-fixed";
 		regulator-name = "vcc3v3_sys";
@@ -230,6 +220,8 @@
 
 	wireless-bluetooth {
 		compatible = "bluetooth-platdata";
+		clocks = <&rk808 1>;
+		clock-names = "ext_clock";
 		//wifi-bt-power-toggle;
 		uart_rts_gpios = <&gpio2 19 GPIO_ACTIVE_LOW>; /* GPIO2_C3 */
 		pinctrl-names = "default", "rts_gpio";
@@ -239,6 +231,10 @@
 		BT,reset_gpio    = <&gpio0 9 GPIO_ACTIVE_HIGH>; /* GPIO0_B1 */
 		BT,wake_gpio     = <&gpio2 26 GPIO_ACTIVE_HIGH>; /* GPIO2_D2 */
 		BT,wake_host_irq = <&gpio0 4 GPIO_ACTIVE_HIGH>; /* GPIO0_A4 */
+		status = "okay";
+	};
+
+	test-power {
 		status = "okay";
 	};
 };
@@ -376,16 +372,36 @@
 		tp-size = <911>;
 		tp-supply = <&vcc3v0_tp>;
 	};
+
+	gsl3673: gsl3673@40 {
+		compatible = "GSL,GSL3673";
+		reg = <0x40>;
+		screen_max_x = <1536>;
+		screen_max_y = <2048>;
+		irq_gpio_number = <&gpio1 20 IRQ_TYPE_LEVEL_LOW>;
+		rst_gpio_number = <&gpio4 22 GPIO_ACTIVE_HIGH>;
+	};
+};
+
+&pcie_phy {
+	status = "disabled";
 };
 
 &pcie0 {
-	assigned-clocks = <&cru SCLK_PCIEPHY_REF>;
-	assigned-clock-parents = <&cru SCLK_PCIEPHY_REF100M>;
-	assigned-clock-rates = <100000000>;
 	ep-gpios = <&gpio3 13 GPIO_ACTIVE_HIGH>;
 	num-lanes = <4>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&pcie_clkreqn>;
+	status = "disabled";
+};
+
+&tcphy0 {
+	extcon = <&fusb0>;
+	status = "okay";
+};
+
+&tcphy1 {
+	extcon = <&fusb1>;
 	status = "okay";
 };
 
@@ -397,6 +413,7 @@
 
 &u2phy0 {
 	status = "okay";
+	extcon = <&fusb0>;
 
 	u2phy0_otg: otg-port {
 		status = "okay";
@@ -410,6 +427,7 @@
 
 &u2phy1 {
 	status = "okay";
+	extcon = <&fusb1>;
 
 	u2phy1_otg: otg-port {
 		status = "okay";
@@ -448,6 +466,7 @@
 };
 
 &usbdrd3_0 {
+	extcon = <&fusb0>;
 	status = "okay";
 };
 
@@ -456,6 +475,7 @@
 };
 
 &usbdrd3_1 {
+	extcon = <&fusb1>;
 	status = "okay";
 };
 
@@ -464,10 +484,6 @@
 };
 
 &pwm0 {
-	status = "okay";
-};
-
-&pwm3 {
 	status = "okay";
 };
 
@@ -514,12 +530,30 @@
 			rockchip,pins =
 				<1 18 RK_FUNC_GPIO &pcfg_pull_down>;
 		};
+		vsel1_gpio: vsel1-gpio {
+			rockchip,pins =
+				<1 17 RK_FUNC_GPIO &pcfg_pull_down>;
+		};
+		vsel2_gpio: vsel2-gpio {
+			rockchip,pins =
+				<1 14 RK_FUNC_GPIO &pcfg_pull_down>;
+		};
 	};
 
 	usb2 {
 		host_vbus_drv: host-vbus-drv {
 			rockchip,pins =
 				<4 25 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+
+	fusb30x {
+		fusb0_int: fusb0-int {
+			rockchip,pins = <1 2 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+
+		fusb1_int: fusb1-int {
+			rockchip,pins = <1 24 RK_FUNC_GPIO &pcfg_pull_up>;
 		};
 	};
 };

@@ -90,6 +90,12 @@ module_param(rk_fb_iommu_debug, int, S_IRUGO | S_IWUSR);
 static int rk_fb_config_debug(struct rk_lcdc_driver *dev_drv,
 			      struct rk_fb_win_cfg_data *win_data,
 			      struct rk_fb_reg_data *regs, u32 cmd);
+static int car_reversing;
+
+static int is_car_camcap(void) {
+	return car_reversing && strcmp("camcap", current->comm);
+}
+
 int support_uboot_display(void)
 {
 	return uboot_logo_on;
@@ -642,6 +648,34 @@ char *get_format_string(enum data_format format, char *fmt)
 	}
 
 	return fmt;
+}
+
+int rk_fb_set_vop_pwm(void)
+{
+	int i = 0;
+	struct rk_fb *inf = NULL;
+	struct rk_lcdc_driver *dev_drv = NULL;
+
+	if (likely(fb_pdev))
+		inf = platform_get_drvdata(fb_pdev);
+	else
+		return -1;
+
+	for (i = 0; i < inf->num_lcdc; i++) {
+		if (inf->lcdc_dev_drv[i]->cabc_mode == 1) {
+			dev_drv = inf->lcdc_dev_drv[i];
+			break;
+		}
+	}
+
+	if (!dev_drv)
+		return -1;
+
+	mutex_lock(&dev_drv->win_config);
+	dev_drv->ops->cfg_done(dev_drv);
+	mutex_unlock(&dev_drv->win_config);
+
+	return 0;
 }
 
 /*
@@ -1346,7 +1380,7 @@ static int rk_fb_pan_display(struct fb_var_screeninfo *var,
 	u16 uv_x_off, uv_y_off, uv_y_act;
 	u8 is_pic_yuv = 0;
 
-	if (dev_drv->suspend_flag)
+	if (dev_drv->suspend_flag || is_car_camcap())
 		return 0;
 	win_id = dev_drv->ops->fb_get_win_id(dev_drv, info->fix.id);
 	if (win_id < 0)
@@ -1899,16 +1933,15 @@ static void rk_fb_update_reg(struct rk_lcdc_driver *dev_drv,
 		}
 	}
 
+	mutex_lock(&dev_drv->win_config);
 	for (i = 0; i < dev_drv->lcdc_win_num; i++) {
 		win = dev_drv->win[i];
 		win_data = rk_fb_get_win_data(regs, i);
 		if (win_data) {
-			mutex_lock(&dev_drv->win_config);
 			rk_fb_update_win(dev_drv, win, win_data);
 			win->state = 1;
 			dev_drv->ops->set_par(dev_drv, i);
 			dev_drv->ops->pan_display(dev_drv, i);
-			mutex_unlock(&dev_drv->win_config);
 		} else {
 			win->z_order = -1;
 			win->state = 0;
@@ -1940,6 +1973,7 @@ static void rk_fb_update_reg(struct rk_lcdc_driver *dev_drv,
 		dev_drv->ops->cfg_done(dev_drv);
 	else
 		sw_sync_timeline_inc(dev_drv->timeline, 1);
+	mutex_unlock(&dev_drv->win_config);
 
 	do {
 		timestamp = dev_drv->vsync_info.timestamp;
@@ -2951,6 +2985,15 @@ static int rk_fb_ioctl(struct fb_info *info, unsigned int cmd,
 			if (cfgdone_index >= 10)
 				cfgdone_index = 0;
 		}
+		if (is_car_camcap()) {
+			int i = 0;
+
+			for (i = 0; i < RK_MAX_BUF_NUM; i++)
+				win_data.rel_fence_fd[i] = -1;
+
+			win_data.ret_fence_fd = -1;
+			goto cam_exit;
+		}
 		if (copy_from_user(&win_data,
 				   (struct rk_fb_win_cfg_data __user *)argp,
 				   sizeof(win_data))) {
@@ -2961,6 +3004,7 @@ static int rk_fb_ioctl(struct fb_info *info, unsigned int cmd,
 		dev_drv->wait_fs = win_data.wait_fs;
 		ret = rk_fb_set_win_config(info, &win_data);
 
+cam_exit:
 		if (copy_to_user((struct rk_fb_win_cfg_data __user *)arg,
 				 &win_data, sizeof(win_data))) {
 			ret = -EFAULT;
@@ -2990,6 +3034,8 @@ static int rk_fb_blank(int blank_mode, struct fb_info *info)
 	struct rk_fb *rk_fb = dev_get_drvdata(info->device);
 #endif
 
+	if (is_car_camcap())
+		return 0;
 	win_id = dev_drv->ops->fb_get_win_id(dev_drv, fix->id);
 	if (win_id < 0)
 		return -ENODEV;
@@ -3201,7 +3247,7 @@ static int rk_fb_set_par(struct fb_info *info)
 	u16 uv_x_off, uv_y_off, uv_y_act;
 	u8 is_pic_yuv = 0;
 	/*var->pixclock = dev_drv->pixclock;*/
-	if (dev_drv->suspend_flag)
+	if (dev_drv->suspend_flag || is_car_camcap())
 		return 0;
 	win_id = dev_drv->ops->fb_get_win_id(dev_drv, info->fix.id);
 	if (win_id < 0)
@@ -3671,50 +3717,37 @@ int rk_fb_switch_screen(struct rk_screen *screen, int enable, int lcdc_id)
 
 	if (!dev_drv->uboot_logo || load_screen ||
 	    (rk_fb->disp_policy != DISPLAY_POLICY_BOX)) {
-		for (i = 0; i < dev_drv->lcdc_win_num; i++) {
-			info = rk_fb->fb[dev_drv->fb_index_base + i];
-			fb_par = (struct rk_fb_par *)info->par;
-			win_id = dev_drv->ops->fb_get_win_id(dev_drv, info->fix.id);
-			win = dev_drv->win[win_id];
-			if (win && fb_par->state) {
-				dev_drv->ops->load_screen(dev_drv, 1);
-
-				info->var.activate |= FB_ACTIVATE_FORCE;
-				if (rk_fb->disp_mode == ONE_DUAL) {
-					info->var.grayscale &= 0xff;
-					info->var.grayscale |=
-						(dev_drv->cur_screen->xsize << 8) +
-						(dev_drv->cur_screen->ysize << 20);
+		info = rk_fb->fb[dev_drv->fb_index_base];
+		fb_par = (struct rk_fb_par *)info->par;
+		win_id = 0;
+		win = dev_drv->win[win_id];
+		if (win && fb_par->state) {
+			dev_drv->ops->load_screen(dev_drv, 1);
+			info->var.activate |= FB_ACTIVATE_FORCE;
+			if (rk_fb->disp_mode == ONE_DUAL) {
+				info->var.grayscale &= 0xff;
+				info->var.grayscale |=
+					(dev_drv->cur_screen->xsize << 8) +
+					(dev_drv->cur_screen->ysize << 20);
+			}
+			if (dev_drv->uboot_logo && win->state) {
+				if (win->area[0].xpos ||
+				    win->area[0].ypos) {
+					win->area[0].xpos =
+						(screen->mode.xres -
+						 win->area[0].xsize) / 2;
+					win->area[0].ypos =
+						(screen->mode.yres -
+						 win->area[0].ysize) / 2;
+				} else {
+					win->area[0].xsize = screen->mode.xres;
+					win->area[0].ysize = screen->mode.yres;
 				}
-				if (dev_drv->uboot_logo && win->state) {
-					if (win->area[0].xpos ||
-					    win->area[0].ypos) {
-						win->area[0].xpos =
-							(screen->mode.xres -
-							 win->area[0].xsize) / 2;
-						win->area[0].ypos =
-							(screen->mode.yres -
-							 win->area[0].ysize) / 2;
-					} else {
-						win->area[0].xsize =
-							screen->mode.xres;
-						win->area[0].ysize =
-							screen->mode.yres;
-					}
-					dev_drv->ops->set_par(dev_drv, i);
-					dev_drv->ops->cfg_done(dev_drv);
-				} else if (!dev_drv->win[win_id]->state) {
-					dev_drv->ops->open(dev_drv, win_id, 1);
-					/* dev_drv->suspend_flag = 0; */
-					/* mutex_lock(&dev_drv->win_config);
-					 * info->var.xoffset = 0;
-					 * info->var.yoffset = 0;
-					 * info->fbops->fb_set_par(info);
-					 * info->fbops->fb_pan_display(&info->var,
-					 *			    info);
-					 * mutex_unlock(&dev_drv->win_config);
-					 */
-				}
+				dev_drv->ops->set_par(dev_drv, i);
+				dev_drv->ops->cfg_done(dev_drv);
+			} else if (!dev_drv->win[win_id]->state) {
+				dev_drv->ops->open(dev_drv, win_id, 1);
+				info->fbops->fb_pan_display(&info->var, info);
 			}
 		}
 	} else {
@@ -4492,6 +4525,29 @@ int rk_fb_unregister(struct rk_lcdc_driver *dev_drv)
 	}
 	fb_inf->lcdc_dev_drv[dev_drv->id] = NULL;
 	fb_inf->num_lcdc--;
+
+	return 0;
+}
+
+int rk_fb_set_car_reverse_status(struct rk_lcdc_driver *dev_drv,
+				 int status)
+{
+	char *envp[3] = {"Request", "FORCE UPDATE", NULL};
+
+	if (status) {
+		car_reversing = 1;
+		flush_kthread_worker(&dev_drv->update_regs_worker);
+		dev_drv->timeline_max++;
+#ifdef H_USE_FENCE
+		sw_sync_timeline_inc(dev_drv->timeline, 1);
+#endif
+		pr_debug("%s: camcap reverse start...\n", __func__);
+	} else {
+		car_reversing = 0;
+		kobject_uevent_env(&dev_drv->dev->kobj,
+				   KOBJ_CHANGE, envp);
+		pr_debug("%s: camcap reverse finish...\n", __func__);
+	}
 
 	return 0;
 }

@@ -47,8 +47,22 @@
 
 	vdd_log: vdd-log {
 		compatible = "pwm-regulator";
+		rockchip,pwm_id = <2>;
+		rockchip,pwm_voltage = <900000>;
 		pwms = <&pwm2 0 25000 0>;
 		regulator-name = "vdd_log";
+		regulator-min-microvolt = <800000>;
+		regulator-max-microvolt = <1400000>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	vdd_center: vdd-center {
+		compatible = "pwm-regulator";
+		rockchip,pwm_id = <3>;
+		rockchip,pwm_voltage = <900000>;
+		pwms = <&pwm3 0 25000 0>;
+		regulator-name = "vdd_center";
 		regulator-min-microvolt = <800000>;
 		regulator-max-microvolt = <1400000>;
 		regulator-always-on;
@@ -94,6 +108,16 @@
 };
 
 &i2c0 {
+	fusb0: fusb30x@22 {
+		compatible = "fairchild,fusb302";
+		reg = <0x22>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&fusb0_int>;
+		vbus-5v-gpios = <&gpio1 3 GPIO_ACTIVE_LOW>;
+		int-n-gpios = <&gpio1 2 GPIO_ACTIVE_HIGH>;
+		status = "okay";
+	};
+
 	mp8865: mp8865@68 {
 		compatible = "mps,mp8865";
 		reg = <0x68>;
@@ -293,7 +317,22 @@
 	};
 };
 
+&i2c4 {
+	fusb1: fusb30x@22 {
+		compatible = "fairchild,fusb302";
+		reg = <0x22>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&fusb1_int>;
+		vbus-5v-gpios = <&gpio1 4 GPIO_ACTIVE_LOW>;
+		int-n-gpios = <&gpio1 24 GPIO_ACTIVE_HIGH>;
+	};
+};
+
 &pwm2 {
+	status = "okay";
+};
+
+&pwm3 {
 	status = "okay";
 };
 

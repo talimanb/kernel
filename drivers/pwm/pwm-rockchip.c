@@ -17,6 +17,7 @@
 #include <linux/platform_device.h>
 #include <linux/pwm.h>
 #include <linux/time.h>
+#include <linux/rk_fb.h>
 
 #define PWM_CTRL_TIMER_EN	(1 << 0)
 #define PWM_CTRL_OUTPUT_EN	(1 << 3)
@@ -89,6 +90,7 @@ static void rockchip_pwm_set_enable_v2(struct pwm_chip *chip,
 		enable_conf |= PWM_DUTY_POSITIVE | PWM_INACTIVE_NEGATIVE;
 
 	val = readl_relaxed(pc->base + pc->data->regs.ctrl);
+	val &= ~(GENMASK(5, 0) | BIT(8));
 
 	if (enable)
 		val |= enable_conf;
@@ -130,6 +132,14 @@ static int rockchip_pwm_config(struct pwm_chip *chip, struct pwm_device *pwm,
 	writel(0, pc->base + pc->data->regs.cntr);
 
 	clk_disable(pc->clk);
+
+#ifdef CONFIG_FB_ROCKCHIP
+	if (!pc->data->regs.ctrl) {
+		ret = rk_fb_set_vop_pwm();
+		if (ret)
+			dev_err(pc->chip.dev, "rk_fb_set_vop_pwm failed: %d\n", ret);
+	}
+#endif
 
 	return 0;
 }
@@ -246,7 +256,8 @@ static int rockchip_pwm_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	pc->base = devm_ioremap_resource(&pdev->dev, r);
+	pc->base = devm_ioremap(&pdev->dev, r->start,
+				resource_size(r));
 	if (IS_ERR(pc->base))
 		return PTR_ERR(pc->base);
 

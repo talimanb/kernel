@@ -19,8 +19,6 @@ Optional properties:
 	Only really useful for FPGA builds.
  - snps,has-lpm-erratum: true when DWC3 was configured with LPM Erratum enabled
  - snps,lpm-nyet-threshold: LPM NYET threshold
- - snps,phyif_utmi_16_bits: true when configure the core to support
-			UTMI+ PHY with an 16-bit interface.
  - snps,u2exit_lfps_quirk: set if we want to enable u2exit lfps quirk
  - snps,u2ss_inp3_quirk: set if we enable P3 OK for U2/SS Inactive quirk
  - snps,req_p1p2p3_quirk: when set, the core will always request for
@@ -39,12 +37,14 @@ Optional properties:
  - snps,dis_u2_susphy_quirk: when set core will disable USB2 suspend phy.
  - snps,dis_enblslpm_quirk: when set clears the enblslpm in GUSB2PHYCFG,
 			disabling the suspend signal to the PHY.
- - snps,dis_u2_freeclk_exists_quirk: when set, clear the u2_freeclk_exists
+ - snps,dis_rxdet_inp3_quirk: when set core will disable receiver detection
+			in PHY P3 power state.
+ - snps,dis-u2-freeclk-exists-quirk: when set, clear the u2_freeclk_exists
 			in GUSB2PHYCFG, specify that USB2 PHY doesn't provide
 			a free-running PHY clock.
- - snps,dis_del_phy_power_chg_quirk: when set core will change PHY power
+ - snps,dis-del-phy-power-chg-quirk: when set core will change PHY power
 			from P0 to P1/P2/P3 without delay.
- - snps,xhci_slow_suspend_quirk: when set, need an extraordinary delay to wait
+ - snps,xhci-slow-suspend-quirk: when set, need an extraordinary delay to wait
 			for xHC enter the Halted state (i.e. HCH in the USBSTS
 			register is '1').
  - snps,is-utmi-l1-suspend: true when DWC3 asserts output signal

@@ -53,6 +53,18 @@
 		regulator-min-microvolt = <5000000>;
 		regulator-max-microvolt = <5000000>;
 	};
+
+	vdd_center: vdd-center {
+		compatible = "pwm-regulator";
+		rockchip,pwm_id = <2>;
+		rockchip,pwm_voltage = <900000>;
+		pwms = <&pwm2 0 25000 0>;
+		regulator-name = "vdd_center";
+		regulator-min-microvolt = <800000>;
+		regulator-max-microvolt = <1400000>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
 };
 
 &cluster0_opp {
@@ -71,7 +83,7 @@
 	};
 	opp@1008000000 {
 		opp-hz = /bits/ 64 <1008000000>;
-		opp-microvolt = <875000>;
+		opp-microvolt = <850000>;
 	};
 	opp@1200000000 {
 		opp-hz = /bits/ 64 <1200000000>;
@@ -83,7 +95,7 @@
 	};
 	opp@1512000000 {
 		opp-hz = /bits/ 64 <1512000000>;
-		opp-microvolt = <1075000>;
+		opp-microvolt = <1100000>;
 	};
 };
 
@@ -103,27 +115,27 @@
 	};
 	opp@1008000000 {
 		opp-hz = /bits/ 64 <1008000000>;
-		opp-microvolt = <875000>;
+		opp-microvolt = <850000>;
 	};
 	opp@1200000000 {
 		opp-hz = /bits/ 64 <1200000000>;
-		opp-microvolt = <950000>;
+		opp-microvolt = <900000>;
 	};
 	opp@1416000000 {
 		opp-hz = /bits/ 64 <1416000000>;
-		opp-microvolt = <1025000>;
+		opp-microvolt = <1000000>;
 	};
 	opp@1608000000 {
 		opp-hz = /bits/ 64 <1608000000>;
-		opp-microvolt = <1100000>;
+		opp-microvolt = <1050000>;
 	};
 	opp@1800000000 {
 		opp-hz = /bits/ 64 <1800000000>;
-		opp-microvolt = <1175000>;
+		opp-microvolt = <1150000>;
 	};
 	opp@1992000000 {
 		opp-hz = /bits/ 64 <1992000000>;
-		opp-microvolt = <1250000>;
+		opp-microvolt = <1225000>;
 	};
 };
 
@@ -227,11 +239,23 @@
 };
 
 &i2c0 {
+	fusb1: fusb30x@22 {
+		compatible = "fairchild,fusb302";
+		reg = <0x22>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&fusb1_int>;
+		vbus-5v-gpios = <&gpio1 4 GPIO_ACTIVE_LOW>;
+		int-n-gpios = <&gpio1 24 GPIO_ACTIVE_HIGH>;
+		status = "okay";
+	};
+
 	vdd_cpu_b: syr827@40 {
 		compatible = "silergy,syr827";
 		reg = <0x40>;
 		vin-supply = <&vcc5v0_sys>;
 		regulator-compatible = "fan53555-reg";
+		pinctrl-0 = <&vsel1_gpio>;
+		vsel-gpios = <&gpio1 17 GPIO_ACTIVE_HIGH>;
 		regulator-name = "vdd_cpu_b";
 		regulator-min-microvolt = <712500>;
 		regulator-max-microvolt = <1500000>;
@@ -250,6 +274,8 @@
 		reg = <0x41>;
 		vin-supply = <&vcc5v0_sys>;
 		regulator-compatible = "fan53555-reg";
+		pinctrl-0 = <&vsel2_gpio>;
+		vsel-gpios = <&gpio1 14 GPIO_ACTIVE_HIGH>;
 		regulator-name = "vdd_gpu";
 		regulator-min-microvolt = <712500>;
 		regulator-max-microvolt = <1500000>;
@@ -448,4 +474,21 @@
 
 &es8316 {
 	reg = <0x11>;
+};
+
+&i2c6 {
+	status = "okay";
+	fusb0: fusb30x@22 {
+		compatible = "fairchild,fusb302";
+		reg = <0x22>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&fusb0_int>;
+		vbus-5v-gpios = <&gpio1 3 GPIO_ACTIVE_LOW>;
+		int-n-gpios = <&gpio1 2 GPIO_ACTIVE_HIGH>;
+		status = "okay";
+	};
+};
+
+&pwm2 {
+	status = "okay";
 };

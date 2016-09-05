@@ -42,6 +42,7 @@ static int dwc3_of_simple_probe(struct platform_device *pdev)
 	struct device		*dev = &pdev->dev;
 	struct device_node	*np = dev->of_node;
 
+	unsigned int		count;
 	int			ret;
 	int			i;
 
@@ -49,11 +50,11 @@ static int dwc3_of_simple_probe(struct platform_device *pdev)
 	if (!simple)
 		return -ENOMEM;
 
-	ret = of_clk_get_parent_count(np);
-	if (ret < 0)
-		return ret;
+	count = of_clk_get_parent_count(np);
+	if (!count)
+		return -ENOENT;
 
-	simple->num_clocks = ret;
+	simple->num_clocks = count;
 
 	simple->clks = devm_kcalloc(dev, simple->num_clocks,
 			sizeof(struct clk *), GFP_KERNEL);
@@ -161,7 +162,6 @@ static const struct dev_pm_ops dwc3_of_simple_dev_pm_ops = {
 static const struct of_device_id of_dwc3_simple_match[] = {
 	{ .compatible = "qcom,dwc3" },
 	{ .compatible = "xlnx,zynqmp-dwc3" },
-	{ .compatible = "rockchip,dwc3" },
 	{ /* Sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, of_dwc3_simple_match);

@@ -227,6 +227,7 @@ struct rockchip_usb2phy {
 	enum usb_chg_state	chg_state;
 	enum power_supply_type	chg_type;
 	u8			dcd_retries;
+	u8			primary_retries;
 	struct extcon_dev	*edev;
 	const struct rockchip_usb2phy_cfg	*phy_cfg;
 	struct rockchip_usb2phy_port	ports[USB2PHY_NUM_PORTS];
@@ -500,7 +501,6 @@ static int rockchip_usb2phy_exit(struct phy *phy)
 
 	if (rport->port_id == USB2PHY_PORT_OTG) {
 		cancel_delayed_work_sync(&rport->chg_work);
-		cancel_delayed_work_sync(&rport->otg_sm_work);
 	} else if (rport->port_id == USB2PHY_PORT_HOST)
 		cancel_delayed_work_sync(&rport->sm_work);
 
@@ -703,6 +703,7 @@ static void rockchip_chg_detect_work(struct work_struct *work)
 		rockchip_chg_enable_dcd(rphy, true);
 		rphy->chg_state = USB_CHG_STATE_WAIT_FOR_DCD;
 		rphy->dcd_retries = 0;
+		rphy->primary_retries = 0;
 		delay = CHG_DCD_POLL_TIME;
 		break;
 	case USB_CHG_STATE_WAIT_FOR_DCD:
@@ -738,6 +739,19 @@ static void rockchip_chg_detect_work(struct work_struct *work)
 				rphy->chg_state = USB_CHG_STATE_DETECTED;
 				delay = 0;
 			} else {
+				if (rphy->primary_retries < 2) {
+					/* Turn off DCD circuitry */
+					rockchip_chg_enable_dcd(rphy, false);
+					/* Voltage Source on DP, Probe on DM */
+					rockchip_chg_enable_primary_det(rphy,
+									true);
+					delay = CHG_PRIMARY_DET_TIME;
+					rphy->chg_state =
+						USB_CHG_STATE_DCD_DONE;
+					rphy->primary_retries++;
+					/* break USB_CHG_STATE_DCD_DONE */
+					break;
+				}
 				rphy->chg_type = POWER_SUPPLY_TYPE_USB;
 				rphy->chg_state = USB_CHG_STATE_DETECTED;
 				delay = 0;
@@ -1199,7 +1213,7 @@ static const struct rockchip_usb2phy_cfg rk3399_phy_cfgs[] = {
 		.clkout_ctl	= { 0xe450, 4, 4, 1, 0 },
 		.port_cfgs	= {
 			[USB2PHY_PORT_OTG] = {
-				.phy_sus	= { 0xe454, 1, 0, 2, 2 },
+				.phy_sus	= { 0xe454, 1, 0, 2, 1 },
 				.bvalid_det_en	= { 0xe3c0, 3, 3, 0, 1 },
 				.bvalid_det_st	= { 0xe3e0, 3, 3, 0, 1 },
 				.bvalid_det_clr	= { 0xe3d0, 3, 3, 0, 1 },
@@ -1234,7 +1248,7 @@ static const struct rockchip_usb2phy_cfg rk3399_phy_cfgs[] = {
 		.clkout_ctl	= { 0xe460, 4, 4, 1, 0 },
 		.port_cfgs	= {
 			[USB2PHY_PORT_OTG] = {
-				.phy_sus        = { 0xe464, 1, 0, 2, 2 },
+				.phy_sus        = { 0xe464, 1, 0, 2, 1 },
 				.bvalid_det_en  = { 0xe3c0, 8, 8, 0, 1 },
 				.bvalid_det_st  = { 0xe3e0, 8, 8, 0, 1 },
 				.bvalid_det_clr = { 0xe3d0, 8, 8, 0, 1 },

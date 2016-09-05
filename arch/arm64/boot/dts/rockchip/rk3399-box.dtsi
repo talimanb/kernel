@@ -147,7 +147,7 @@
 	};
 
 	hdmi_sound: hdmi-sound {
-		status = "okay";
+		status = "disabled";
 		compatible = "simple-audio-card";
 		simple-audio-card,format = "i2s";
 		simple-audio-card,mclk-fs = <256>;
@@ -193,6 +193,8 @@
 
 	wireless-bluetooth {
 		compatible = "bluetooth-platdata";
+		clocks = <&rk808 1>;
+		clock-names = "ext_clock";
 		/* wifi-bt-power-toggle; */
 		uart_rts_gpios = <&gpio2 19 GPIO_ACTIVE_LOW>;
 		pinctrl-names = "default", "rts_gpio";
@@ -204,11 +206,15 @@
 		BT,wake_host_irq = <&gpio0 4 GPIO_ACTIVE_HIGH>;
 		status = "okay";
 	};
+
+	test-power {
+		status = "okay";
+	};
 };
 
 &sdmmc {
 	clock-frequency = <100000000>;
-	clock-freq-min-max = <400000 100000000>;
+	clock-freq-min-max = <100000 100000000>;
 	supports-sd;
 	bus-width = <4>;
 	cap-mmc-highspeed;
@@ -480,6 +486,7 @@
 		regulator-always-on;
 		regulator-boot-on;
 		vin-supply = <&vcc_sys>;
+		regulator-initial-mode = <1>; /* 1:force PWM 2:auto */
 		regulator-state-mem {
 			regulator-off-in-suspend;
 		};
@@ -704,16 +711,35 @@
 	status = "okay";
 };
 
+&threshold {
+	temperature = <85000>;
+};
+
+&target {
+	temperature = <100000>;
+};
+
+&soc_crit {
+	temperature = <105000>;
+};
+
+&tcphy0 {
+	extcon = <&fusb0>;
+	status = "okay";
+};
+
 &tsadc {
 	/* tshut mode 0:CRU 1:GPIO */
 	rockchip,hw-tshut-mode = <1>;
 	/* tshut polarity 0:LOW 1:HIGH */
 	rockchip,hw-tshut-polarity = <1>;
+	rockchip,hw-tshut-temp = <110000>;
 	status = "okay";
 };
 
 &u2phy0 {
 	status = "okay";
+	extcon = <&fusb0>;
 
 	u2phy0_otg: otg-port {
 		status = "okay";
@@ -765,6 +791,7 @@
 };
 
 &usbdrd3_0 {
+	extcon = <&fusb0>;
 	status = "okay";
 };
 
@@ -928,6 +955,16 @@
 &hdmi_rk_fb {
 	status = "okay";
 	rockchip,hdmi_video_source = <DISPLAY_SOURCE_LCDC0>;
+};
+
+&cdn_dp_sound {
+	status = "okay";
+};
+
+&cdn_dp_fb {
+	status = "okay";
+	extcon = <&fusb0>;
+	phys = <&tcphy0 0>;
 };
 
 &i2s2 {

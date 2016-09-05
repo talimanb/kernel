@@ -31,6 +31,7 @@
 #include <linux/reset.h>
 #include <linux/delay.h>
 #include <linux/sort.h>
+#include <uapi/drm/rockchip_drm.h>
 
 #include "rockchip_drm_drv.h"
 #include "rockchip_drm_gem.h"
@@ -153,6 +154,9 @@ struct vop {
 	struct device *dev;
 	struct drm_device *drm_dev;
 	struct drm_property *plane_zpos_prop;
+	struct drm_property *plane_feature_prop;
+	bool is_iommu_enabled;
+	bool is_iommu_needed;
 
 	/* mutex vsync_ work */
 	struct mutex vsync_mutex;
@@ -255,6 +259,43 @@ static inline uint32_t vop_get_intr_type(struct vop *vop,
 static inline void vop_cfg_done(struct vop *vop)
 {
 	VOP_CTRL_SET(vop, cfg_done, 1);
+}
+
+static bool vop_is_allwin_disabled(struct vop *vop)
+{
+	int i;
+
+	for (i = 0; i < vop->num_wins; i++) {
+		struct vop_win *win = &vop->win[i];
+
+		if (VOP_WIN_GET(vop, win, enable) != 0)
+			return false;
+	}
+
+	return true;
+}
+
+static bool vop_win_pending_is_complete(struct vop *vop)
+{
+	dma_addr_t yrgb_mst;
+	int i;
+
+	for (i = 0; i < vop->num_wins; i++) {
+		struct vop_win *win = &vop->win[i];
+		struct drm_plane *plane = &win->base;
+		struct vop_plane_state *state =
+				to_vop_plane_state(plane->state);
+		if (!state->enable) {
+			if (VOP_WIN_GET(vop, win, enable) != 0)
+				return false;
+			continue;
+		}
+		yrgb_mst = VOP_WIN_GET_YRGBADDR(vop, win);
+		if (yrgb_mst != state->yrgb_mst)
+			return false;
+	}
+
+	return true;
 }
 
 static bool has_rb_swapped(uint32_t format)
@@ -507,18 +548,6 @@ static void vop_enable(struct drm_crtc *crtc)
 		return;
 	}
 
-	/*
-	 * Slave iommu shares power, irq and clock with vop.  It was associated
-	 * automatically with this master device via common driver code.
-	 * Now that we have enabled the clock we attach it to the shared drm
-	 * mapping.
-	 */
-	ret = rockchip_drm_dma_attach_device(vop->drm_dev, vop->dev);
-	if (ret) {
-		dev_err(vop->dev, "failed to attach dma mapping, %d\n", ret);
-		goto err_disable_aclk;
-	}
-
 	memcpy(vop->regsbak, vop->regs, vop->len);
 
 	VOP_CTRL_SET(vop, global_regdone_en, 1);
@@ -541,8 +570,6 @@ static void vop_enable(struct drm_crtc *crtc)
 
 	return;
 
-err_disable_aclk:
-	clk_disable_unprepare(vop->aclk);
 err_disable_dclk:
 	clk_disable_unprepare(vop->dclk);
 err_disable_hclk:
@@ -592,10 +619,13 @@ static void vop_crtc_disable(struct drm_crtc *crtc)
 
 	disable_irq(vop->irq);
 
-	/*
-	 * vop standby complete, so iommu detach is safe.
-	 */
-	rockchip_drm_dma_detach_device(vop->drm_dev, vop->dev);
+	if (vop->is_iommu_enabled) {
+		/*
+		 * vop standby complete, so iommu detach is safe.
+		 */
+		rockchip_drm_dma_detach_device(vop->drm_dev, vop->dev);
+		vop->is_iommu_enabled = false;
+	}
 
 	pm_runtime_put(vop->dev);
 	clk_disable_unprepare(vop->dclk);
@@ -732,8 +762,6 @@ static void vop_plane_atomic_update(struct drm_plane *plane,
 	uint32_t act_info, dsp_info, dsp_st;
 	struct drm_rect *src = &vop_plane_state->src;
 	struct drm_rect *dest = &vop_plane_state->dest;
-	struct drm_gem_object *obj, *uv_obj;
-	struct rockchip_gem_object *rk_obj, *rk_uv_obj;
 	unsigned long offset;
 	dma_addr_t dma_addr;
 	int ymirror, xmirror;
@@ -751,9 +779,6 @@ static void vop_plane_atomic_update(struct drm_plane *plane,
 		return;
 	}
 
-	obj = rockchip_fb_get_gem_obj(fb, 0);
-	rk_obj = to_rockchip_obj(obj);
-
 	actual_w = drm_rect_width(src) >> 16;
 	actual_h = drm_rect_height(src) >> 16;
 	act_info = (actual_h - 1) << 16 | ((actual_w - 1) & 0xffff);
@@ -770,7 +795,9 @@ static void vop_plane_atomic_update(struct drm_plane *plane,
 		offset += ((src->y2 >> 16) - 1) * fb->pitches[0];
 	else
 		offset += (src->y1 >> 16) * fb->pitches[0];
-	vop_plane_state->yrgb_mst = rk_obj->dma_addr + offset + fb->offsets[0];
+
+	dma_addr = rockchip_fb_get_dma_addr(fb, 0, vop->dev);
+	vop_plane_state->yrgb_mst = dma_addr + offset + fb->offsets[0];
 
 	ymirror = !!(state->rotation & BIT(DRM_REFLECT_Y));
 	xmirror = !!(state->rotation & BIT(DRM_REFLECT_X));
@@ -787,13 +814,11 @@ static void vop_plane_atomic_update(struct drm_plane *plane,
 		int vsub = drm_format_vert_chroma_subsampling(fb->pixel_format);
 		int bpp = drm_format_plane_cpp(fb->pixel_format, 1);
 
-		uv_obj = rockchip_fb_get_gem_obj(fb, 1);
-		rk_uv_obj = to_rockchip_obj(uv_obj);
-
 		offset = (src->x1 >> 16) * bpp / hsub;
 		offset += (src->y1 >> 16) * fb->pitches[1] / vsub;
 
-		dma_addr = rk_uv_obj->dma_addr + offset + fb->offsets[1];
+		dma_addr = rockchip_fb_get_dma_addr(fb, 1, vop->dev);
+		dma_addr += offset + fb->offsets[1];
 		VOP_WIN_SET(vop, win, uv_vir, fb->pitches[1] >> 2);
 		VOP_WIN_SET(vop, win, uv_mst, dma_addr);
 	}
@@ -828,6 +853,7 @@ static void vop_plane_atomic_update(struct drm_plane *plane,
 
 	VOP_WIN_SET(vop, win, enable, 1);
 	spin_unlock(&vop->reg_lock);
+	vop->is_iommu_needed = true;
 }
 
 static const struct drm_plane_helper_funcs plane_helper_funcs = {
@@ -1197,8 +1223,8 @@ err_free_pzpos:
 	return ret;
 }
 
-static void vop_crtc_atomic_flush(struct drm_crtc *crtc,
-				  struct drm_crtc_state *old_crtc_state)
+static void vop_cfg_update(struct drm_crtc *crtc,
+			   struct drm_crtc_state *old_crtc_state)
 {
 	struct rockchip_crtc_state *s =
 			to_rockchip_crtc_state(crtc->state);
@@ -1210,6 +1236,27 @@ static void vop_crtc_atomic_flush(struct drm_crtc *crtc,
 	vop_cfg_done(vop);
 
 	spin_unlock(&vop->reg_lock);
+}
+
+static void vop_crtc_atomic_flush(struct drm_crtc *crtc,
+				  struct drm_crtc_state *old_crtc_state)
+{
+	struct vop *vop = to_vop(crtc);
+
+	if (!vop->is_iommu_enabled && vop->is_iommu_needed) {
+		int ret;
+		if (!vop_is_allwin_disabled(vop)) {
+			vop_cfg_update(crtc, old_crtc_state);
+			while(!vop_win_pending_is_complete(vop));
+		}
+		ret = rockchip_drm_dma_attach_device(vop->drm_dev, vop->dev);
+		if (ret) {
+			dev_err(vop->dev, "failed to attach dma mapping, %d\n", ret);
+		}
+		vop->is_iommu_enabled = true;
+	}
+
+	vop_cfg_update(crtc, old_crtc_state);
 }
 
 static void vop_crtc_atomic_begin(struct drm_crtc *crtc,
@@ -1239,6 +1286,17 @@ static void vop_crtc_destroy(struct drm_crtc *crtc)
 	drm_crtc_cleanup(crtc);
 }
 
+static void vop_crtc_reset(struct drm_crtc *crtc)
+{
+	if (crtc->state)
+		__drm_atomic_helper_crtc_destroy_state(crtc, crtc->state);
+	kfree(crtc->state);
+
+	crtc->state = kzalloc(sizeof(struct rockchip_crtc_state), GFP_KERNEL);
+	if (crtc->state)
+		crtc->state->crtc = crtc;
+}
+
 static struct drm_crtc_state *vop_crtc_duplicate_state(struct drm_crtc *crtc)
 {
 	struct rockchip_crtc_state *rockchip_state;
@@ -1264,36 +1322,19 @@ static const struct drm_crtc_funcs vop_crtc_funcs = {
 	.set_config = drm_atomic_helper_set_config,
 	.page_flip = drm_atomic_helper_page_flip,
 	.destroy = vop_crtc_destroy,
-	.reset = drm_atomic_helper_crtc_reset,
+	.reset = vop_crtc_reset,
 	.atomic_duplicate_state = vop_crtc_duplicate_state,
 	.atomic_destroy_state = vop_crtc_destroy_state,
 };
-
-static bool vop_win_pending_is_complete(struct vop_win *vop_win)
-{
-	struct drm_plane *plane = &vop_win->base;
-	struct vop_plane_state *state = to_vop_plane_state(plane->state);
-	dma_addr_t yrgb_mst;
-
-	if (!state->enable)
-		return VOP_WIN_GET(vop_win->vop, vop_win, enable) == 0;
-
-	yrgb_mst = VOP_WIN_GET_YRGBADDR(vop_win->vop, vop_win);
-
-	return yrgb_mst == state->yrgb_mst;
-}
 
 static void vop_handle_vblank(struct vop *vop)
 {
 	struct drm_device *drm = vop->drm_dev;
 	struct drm_crtc *crtc = &vop->crtc;
 	unsigned long flags;
-	int i;
 
-	for (i = 0; i < vop->num_wins; i++) {
-		if (!vop_win_pending_is_complete(&vop->win[i]))
-			return;
-	}
+	if (!vop_win_pending_is_complete(vop))
+		return;
 
 	if (vop->event) {
 		spin_lock_irqsave(&drm->event_lock, flags);
@@ -1359,6 +1400,7 @@ static int vop_plane_init(struct vop *vop, struct vop_win *win,
 	struct drm_plane *share = NULL;
 	unsigned int rotations = 0;
 	struct drm_property *prop;
+	uint64_t feature = 0;
 	int ret;
 
 	if (win->parent)
@@ -1393,6 +1435,14 @@ static int vop_plane_init(struct vop *vop, struct vop_win *win,
 					   BIT(DRM_ROTATE_0));
 		win->rotation_prop = prop;
 	}
+	if (win->phy->scl)
+		feature |= BIT(ROCKCHIP_DRM_PLANE_FEATURE_SCALE);
+	if (VOP_WIN_SUPPORT(vop, win, src_alpha_ctl) ||
+	    VOP_WIN_SUPPORT(vop, win, alpha_en))
+		feature |= BIT(ROCKCHIP_DRM_PLANE_FEATURE_ALPHA);
+
+	drm_object_attach_property(&win->base.base, vop->plane_feature_prop,
+				   feature);
 
 	return 0;
 }
@@ -1515,6 +1565,10 @@ static int vop_win_init(struct vop *vop)
 	unsigned int i, j;
 	unsigned int num_wins = 0;
 	struct drm_property *prop;
+	static const struct drm_prop_enum_list props[] = {
+		{ ROCKCHIP_DRM_PLANE_FEATURE_SCALE, "scale" },
+		{ ROCKCHIP_DRM_PLANE_FEATURE_ALPHA, "alpha" },
+	};
 
 	for (i = 0; i < vop_data->win_size; i++) {
 		struct vop_win *vop_win = &vop->win[num_wins];
@@ -1559,6 +1613,16 @@ static int vop_win_init(struct vop *vop)
 		return -EINVAL;
 	}
 	vop->plane_zpos_prop = prop;
+
+	vop->plane_feature_prop = drm_property_create_bitmask(vop->drm_dev,
+				DRM_MODE_PROP_IMMUTABLE, "FEATURE",
+				props, ARRAY_SIZE(props),
+				BIT(ROCKCHIP_DRM_PLANE_FEATURE_SCALE) |
+				BIT(ROCKCHIP_DRM_PLANE_FEATURE_ALPHA));
+	if (!vop->plane_feature_prop) {
+		DRM_ERROR("failed to create feature property\n");
+		return -EINVAL;
+	}
 
 	return 0;
 }

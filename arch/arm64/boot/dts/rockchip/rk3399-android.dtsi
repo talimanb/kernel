@@ -161,6 +161,47 @@
 		};
 	};
 
+	cdn_dp_fb: dp-fb@fec00000 {
+		status = "disabled";
+		compatible = "rockchip,rk3399-cdn-dp-fb";
+		reg = <0x0 0xfec00000 0x0 0x100000>;
+		interrupts = <GIC_SPI 9 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&cru SCLK_DP_CORE>, <&cru PCLK_DP_CTRL>,
+			 <&cru SCLK_SPDIF_REC_DPTX>;
+		clock-names = "core-clk", "pclk", "spdif";
+		assigned-clocks = <&cru SCLK_DP_CORE>;
+		assigned-clock-rates = <100000000>;
+		power-domains = <&power RK3399_PD_HDCP>;
+		phys = <&tcphy0 0>, <&tcphy1 0>;
+		resets = <&cru SRST_DPTX_SPDIF_REC>;
+		reset-names = "spdif";
+		rockchip,grf = <&grf>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		#sound-dai-cells = <1>;
+	};
+
+	cdn_dp_sound: cdn-dp-sound {
+		status = "disabled";
+		compatible = "simple-audio-card";
+		simple-audio-card,name = "rockchip,cdn-dp-fb";
+		simple-audio-card,widgets = "Headphone", "Out Jack",
+					    "Line", "In Jack";
+
+		simple-audio-card,dai-link@0 {
+			format = "i2s";
+			mclk-fs = <256>;
+
+			cpu {
+				sound-dai = <&i2s2>;
+			};
+
+			codec {
+				sound-dai = <&cdn_dp_fb 0>;
+			};
+		};
+	};
+
 	vpu: vpu_service@ff650000 {
 		compatible = "rockchip,vpu_service";
 		rockchip,grf = <&grf>;
@@ -268,6 +309,7 @@
 		rockchip,pwr18 = <0>;
 		rockchip,iommu-enabled = <1>;
 		power-domains = <&power RK3399_PD_VOPB>;
+		devfreq = <&dmc>;
 	};
 
 	vopb_mmu_rk_fb: vopb-mmu {
@@ -293,6 +335,7 @@
 		rockchip,pwr18 = <0>;
 		rockchip,iommu-enabled = <1>;
 		power-domains = <&power RK3399_PD_VOPL>;
+		devfreq = <&dmc>;
 	};
 
 	vopl_mmu_rk_fb: vopl-mmu {
@@ -327,7 +370,7 @@
 		pinctrl-0 = <&cif_clkout>;
 		pinctrl-1 = <&isp_dvp_d0d7>;
 		pinctrl-2 = <&cif_clkout>;
-		pinctrl-3 = <&cif_clkout &isp_prelight>;
+		pinctrl-3 = <&isp_prelight>;
 		pinctrl-4 = <&isp_flash_trigger_as_gpio>;
 		pinctrl-5 = <&isp_flash_trigger>;
 		rockchip,isp,mipiphy = <2>;
@@ -360,22 +403,24 @@
 			<&cru SCLK_ISP1>, <&cru SCLK_CIF_OUT>,
 			<&cru SCLK_CIF_OUT>, <&cru SCLK_DPHY_TX1RX1_CFG>,
 			<&cru SCLK_MIPIDPHY_REF>, <&cru PCLK_ISP1_WRAPPER>,
-			<&cru SCLK_DPHY_RX0_CFG>;
+			<&cru SCLK_DPHY_RX0_CFG>, <&cru PCLK_MIPI_DSI1>,
+			<&cru SCLK_MIPIDPHY_CFG>;
 		clock-names =
 			"aclk_isp1_noc", "aclk_isp1_wrapper",
 			"hclk_isp1_noc", "hclk_isp1_wrapper",
 			"clk_isp1", "clk_cif_out",
 			"clk_cif_pll", "pclk_dphytxrx",
 			"pclk_dphy_ref", "pclk_isp1",
-			"pclk_dphyrx";
+			"pclk_dphyrx", "pclk_mipi_dsi",
+			"mipi_dphy_cfg";
 		pinctrl-names =
 			"cif_clkout","isp_dvp8bit0", "isp_mipi_fl",
 			"isp_mipi_fl_prefl", "isp_flash_as_gpio",
 			"isp_flash_as_trigger_out";
 		pinctrl-0 = <&cif_clkout>;
-		pinctrl-1 = <&cif_clkout &isp_dvp_d0d7>;
+		pinctrl-1 = <&isp_dvp_d0d7>;
 		pinctrl-2 = <&cif_clkout>;
-		pinctrl-3 = <&cif_clkout &isp_prelight>;
+		pinctrl-3 = <&isp_prelight>;
 		pinctrl-4 = <&isp_flash_trigger_as_gpio>;
 		pinctrl-5 = <&isp_flash_trigger>;
 		rockchip,isp,mipiphy = <2>;
@@ -460,10 +505,6 @@
 	};
 };
 
-&usbdrd_dwc3_0 {
-	dr_mode = "peripheral";
-};
-
 &pinctrl {
 	isp {
 		cif_clkout: cif-clkout {
@@ -495,9 +536,7 @@
 			/*cif_href*/
 			<2 9 RK_FUNC_3 &pcfg_pull_none>,
 			/*cif_clkin*/
-			<2 10 RK_FUNC_3 &pcfg_pull_none>,
-			/*cif_clkout*/
-			<2 11 RK_FUNC_3 &pcfg_pull_none>;
+			<2 10 RK_FUNC_3 &pcfg_pull_none>;
 		};
 
 		isp_shutter: isp-shutter {
