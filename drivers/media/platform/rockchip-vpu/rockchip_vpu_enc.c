@@ -73,6 +73,14 @@ static struct rockchip_vpu_fmt formats[] = {
 		.enc_fmt = ROCKCHIP_VPU_ENC_FMT_YUV420SP,
 	},
 	{
+		.name = "4:2:0 2 plane Y/CbCr",
+		.fourcc = V4L2_PIX_FMT_NV12,
+		.codec_mode = RK_VPU_CODEC_NONE,
+		.num_planes = 1,
+		.depth = { 12 },
+		.enc_fmt = ROCKCHIP_VPU_ENC_FMT_YUV420SP,
+	},
+	{
 		.name = "4:2:2 1 plane YUYV",
 		.fourcc = V4L2_PIX_FMT_YUYV,
 		.codec_mode = RK_VPU_CODEC_NONE,
@@ -99,6 +107,12 @@ static struct rockchip_vpu_fmt formats[] = {
 		.name = "H264 Encoded Stream",
 		.fourcc = V4L2_PIX_FMT_H264,
 		.codec_mode = RK3288_VPU_CODEC_H264E,
+		.num_planes = 1,
+	},
+	{
+		.name = "JPEG Encoded Stream",
+		.fourcc = V4L2_PIX_FMT_JPEG,
+		.codec_mode = RK3288_VPU_CODEC_ENC_JPEG,
 		.num_planes = 1,
 	},
 };
@@ -561,6 +575,10 @@ static void calculate_plane_sizes(struct rockchip_vpu_fmt *fmt,
 		 */
 		if (i != 0)
 			pix_fmt_mp->plane_fmt[i].sizeimage /= 2;
+	}
+
+	if (fmt->num_planes == 1) {
+		fmt->chroma_offset = w * h;
 	}
 }
 
