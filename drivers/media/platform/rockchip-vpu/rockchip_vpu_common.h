@@ -415,6 +415,7 @@ struct rockchip_vpu_fmt {
 	int num_planes;
 	u8 depth[VIDEO_MAX_PLANES];
 	enum rockchip_vpu_enc_fmt enc_fmt;
+	u32 chroma_offset;
 };
 
 /**
